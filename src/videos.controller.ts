@@ -19,7 +19,7 @@ interface ChannelMeta {
 }
 
 interface Progress {
-  [channelSlug: string]: string;
+  [channelSlug: string]: any;
 }
 
 const DATA_DIR = join(__dirname, '..', 'data');
@@ -138,9 +138,9 @@ export class VideosController {
   }
 
   @Post('progress/:slug')
-  setProgress(@Param('slug') slug: string, @Body() body: { videoId: string }): { ok: true } {
+  setProgress(@Param('slug') slug: string, @Body() body: { videoId: string; time?: number }): { ok: true } {
     const progress = this.getProgress();
-    progress[slug] = body.videoId;
+    progress[slug] = { videoId: body.videoId, time: body.time || 0 };
     progress['_lastChannel'] = slug;
     writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2));
     this.addToHistory(slug, body.videoId);

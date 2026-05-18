@@ -128,6 +128,7 @@
     let current = 0;
     let progress = {};
     let ytPlayer = null;
+    let savedTime = 0;
 
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
@@ -144,15 +145,19 @@
     function createPlayer(videoId) {
       if (!ytReady) { pendingVideoId = videoId; return; }
       if (ytPlayer) {
-        ytPlayer.loadVideoById(videoId);
+        ytPlayer.loadVideoById({ videoId: videoId, startSeconds: savedTime });
+        savedTime = 0;
         return;
       }
       ytPlayer = new YT.Player('player', {
         width: '100%',
         height: '100%',
         videoId: videoId,
-        playerVars: { autoplay: 1 },
-        events: { onStateChange: onPlayerStateChange },
+        playerVars: { autoplay: 1, start: Math.floor(savedTime) },
+        events: {
+          onStateChange: onPlayerStateChange,
+          onReady: () => { if (savedTime) { ytPlayer.seekTo(savedTime, true); savedTime = 0; } },
+        },
       });
     }
 
@@ -194,7 +199,10 @@
     async function selectChannel(slug) {
       currentSlug = slug;
       videos = await fetch(`/api/channels/${slug}/videos`).then(r => r.json());
-      const savedId = progress[slug];
+      const saved = progress[slug];
+      // Support both old format (string) and new format ({videoId, time})
+      const savedId = saved?.videoId || saved;
+      savedTime = saved?.time || 0;
       current = savedId ? videos.findIndex(v => v.id === savedId) : 0;
       if (current < 0) current = 0;
       document.getElementById('player-section').classList.remove('hidden');
@@ -202,7 +210,6 @@
         b.classList.toggle('active', b.dataset.slug === slug);
       });
       render();
-      save();
     }
 
     function render() {
@@ -215,18 +222,19 @@
     }
 
     async function save() {
-      progress[currentSlug] = videos[current].id;
+      const time = (ytPlayer && ytPlayer.getCurrentTime) ? ytPlayer.getCurrentTime() : 0;
+      progress[currentSlug] = { videoId: videos[current].id, time };
       await fetch(`/api/progress/${currentSlug}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoId: videos[current].id }),
+        body: JSON.stringify({ videoId: videos[current].id, time }),
       });
       fetch('/api/channels').then(r => r.json()).then(chs => { channels = chs; renderChannels(); });
       if (!document.getElementById('history-panel').classList.contains('hidden')) renderHistory();
     }
 
-    function next() { if (current < videos.length - 1) { current++; save(); render(); } }
-    function prev() { if (current > 0) { current--; save(); render(); } }
+    function next() { if (current < videos.length - 1) { current++; savedTime = 0; save(); render(); } }
+    function prev() { if (current > 0) { current--; savedTime = 0; save(); render(); } }
     function markDone() { next(); }
     function jump() {
       const n = parseInt(document.getElementById('jumpInput').value, 10);
@@ -353,6 +361,18 @@
     init();
     applyLang();
     document.getElementById('apiKeyInput').value = localStorage.getItem('yt-api-key') || '';
+
+    // Auto-save playback time every 30s
+    setInterval(() => {
+      if (currentSlug && ytPlayer && ytPlayer.getCurrentTime && ytPlayer.getCurrentTime() > 0) save();
+    }, 30000);
+    window.addEventListener('beforeunload', () => {
+      if (currentSlug && ytPlayer && ytPlayer.getCurrentTime && ytPlayer.getCurrentTime() > 0) {
+        const time = ytPlayer.getCurrentTime();
+        const blob = new Blob([JSON.stringify({ videoId: videos[current].id, time })], { type: 'application/json' });
+        navigator.sendBeacon(`/api/progress/${currentSlug}`, blob);
+      }
+    });
   </script>
 </body>
 </html>
