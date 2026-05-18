@@ -10,6 +10,7 @@ const i18n = {
     history: '📜 History', clearAll: '🗑 Clear All', titleCol: 'Title', length: 'Length', date: 'Date',
     confirmClear: 'Delete ALL watch history for this channel?', noChannels: 'No channels found.',
     searching: 'Searching...', starting: 'Starting...', connLost: 'Connection lost.', videos: 'videos',
+    confirmDelete: 'Delete "{name}" and all its data?', fetchDone: 'Done! {count} videos saved.',
   },
   ja: {
     title: 'YouTubeチャレンジ', channel: 'チャンネル', channelPh: '名前、@ハンドル、またはID',
@@ -18,6 +19,7 @@ const i18n = {
     history: '📜 履歴', clearAll: '🗑 全削除', titleCol: 'タイトル', length: '長さ', date: '日付',
     confirmClear: 'このチャンネルの視聴履歴を全て削除しますか？', noChannels: 'チャンネルが見つかりません。',
     searching: '検索中...', starting: '開始中...', connLost: '接続が切れました。', videos: '本',
+    confirmDelete: '「{name}」とそのデータを全て削除しますか？', fetchDone: '完了！{count}本の動画を保存しました。',
   }
 } as const;
 
@@ -217,7 +219,7 @@ export default function Player() {
   }
 
   async function deleteChannel(s: string, name: string) {
-    if (!confirm(`Delete "${name}" and all its data?`)) return;
+    if (!confirm(t('confirmDelete').replace('{name}', name))) return;
     await fetch(`/api/channels/${s}`, { method: 'DELETE' });
     const chs = await fetch('/api/channels').then(r => r.json());
     setChannels(chs);
@@ -255,7 +257,7 @@ export default function Player() {
     });
     const data = await res.json();
     if (data.error) { setFetchStatus(`Error: ${data.error}`); return; }
-    setFetchStatus(`Done! ${data.videoCount} videos saved.`);
+    setFetchStatus(t('fetchDone').replace('{count}', data.videoCount));
     setQuery(''); setSlug('');
     const chs = await fetch('/api/channels').then(r => r.json());
     setChannels(chs);
