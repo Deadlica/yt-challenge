@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶️</text></svg>">
+  <title>YouTube Challenge</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem; }
+    h1 { margin-bottom: 1.5rem; font-size: 1.5rem; }
+    .lang-toggle { position: absolute; top: 1rem; right: 1rem; font-size: 0.85rem; cursor: pointer; background: #272727; border: 1px solid #444; color: #fff; padding: 0.3rem 0.6rem; border-radius: 4px; }
+    .channel-list { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-bottom: 1.5rem; }
+    .channel-btn { padding: 0.5rem 1rem; border: 1px solid #444; border-radius: 6px; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 0.9rem; }
+    .channel-btn.active { border-color: #1a7f37; background: #1a3a1f; }
+    .channel-btn:hover { background: #272727; }
+    .progress { margin-bottom: 1rem; color: #aaa; }
+    .video-container { width: 100%; max-width: 800px; aspect-ratio: 16/9; margin-bottom: 1.5rem; }
+    .video-container iframe { width: 100%; height: 100%; border: none; border-radius: 8px; }
+    .title { margin-bottom: 1rem; font-size: 1.1rem; text-align: center; max-width: 800px; }
+    .controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+    button { padding: 0.6rem 1.5rem; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; background: #272727; color: #fff; transition: background 0.2s; }
+    button:hover { background: #3a3a3a; }
+    button.done { background: #1a7f37; }
+    button.done:hover { background: #22963e; }
+    .hidden { display: none; }
+    .jump { margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center; }
+    .jump input { width: 5rem; padding: 0.4rem; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: #fff; font-size: 0.9rem; }
+    .toggle { display: flex; align-items: center; gap: 0.4rem; margin-left: 1rem; font-size: 0.85rem; color: #aaa; }
+    .toggle input { cursor: pointer; }
+    .add-section { margin-bottom: 1.5rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .add-section input { padding: 0.5rem; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: #fff; font-size: 0.9rem; width: 14rem; }
+    .add-section input.slug-input { width: 7rem; }
+    .fetch-status { color: #aaa; font-size: 0.85rem; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <button class="lang-toggle" onclick="toggleLang()" id="langBtn">EN/JP</button>
+  <h1 data-i18n="title">YouTube Challenge</h1>
+  <div class="add-section">
+    <label><small data-i18n="channel">Channel</small><br><input type="text" id="addChannel" data-i18n-ph="channelPh" placeholder="name, @handle, or ID" onkeydown="if(event.key==='Enter')searchChannel()"></label>
+    <label><small data-i18n="folderName">Folder name</small><br><input type="text" id="addSlug" class="slug-input" data-i18n-ph="optional" placeholder="optional" onkeydown="if(event.key==='Enter')searchChannel()"></label>
+    <label><small data-i18n="apiKey">API Key</small><br><input type="password" id="apiKeyInput" class="slug-input" data-i18n-ph="optional" placeholder="optional" style="width:10rem" onkeydown="if(event.key==='Enter')searchChannel()" oninput="localStorage.setItem('yt-api-key',this.value)"></label>
+    <button onclick="searchChannel()" style="align-self:flex-end" data-i18n="search">🔍 Search</button>
+  </div>
+  <div id="searchResults" class="hidden" style="margin-bottom:1rem; width:100%; max-width:800px;"></div>
+  <div class="fetch-status" id="fetchStatus"></div>
+  <div class="channel-list" id="channels"></div>
+  <div id="player-section" class="hidden">
+    <div class="progress" id="progress"></div>
+    <div class="video-container"><div id="player"></div></div>
+    <div class="title" id="title"></div>
+    <div class="controls">
+      <button onclick="prev()" data-i18n="prev">← Prev</button>
+      <button class="done" onclick="markDone()" data-i18n="done">Done → Next</button>
+      <button onclick="next()" data-i18n="next">Next →</button>
+      <label class="toggle"><input type="checkbox" id="autoplay" checked> <span data-i18n="autoplay">Autoplay next</span></label>
+    </div>
+    <div class="jump">
+      <input type="number" id="jumpInput" min="1" placeholder="#">
+      <button onclick="jump()" data-i18n="go">Go</button>
+      <button onclick="toggleHistory()" style="margin-left:1rem" data-i18n="history">📜 History</button>
+      <button onclick="clearHistory()" style="background:#3a1a1a;border:1px solid #633;" data-i18n="clearAll">🗑 Clear All</button>
+    </div>
+    <div id="history-panel" class="hidden" style="margin-top:1.5rem; width:100%; max-width:800px; max-height:400px; overflow-y:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+        <thead><tr style="border-bottom:1px solid #333;"><th style="text-align:left;padding:0.3rem">#</th><th style="text-align:left;padding:0.3rem" data-i18n="titleCol">Title</th><th style="text-align:right;padding:0.3rem" data-i18n="length">Length</th><th style="text-align:right;padding:0.3rem" data-i18n="date">Date</th><th></th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const i18n = {
+      en: {
+        title: 'YouTube Challenge',
+        channel: 'Channel', channelPh: 'name, @handle, or ID',
+        folderName: 'Folder name', optional: 'optional',
+        apiKey: 'API Key', search: '🔍 Search',
+        prev: '← Prev', done: 'Done → Next', next: 'Next →',
+        autoplay: 'Autoplay next', go: 'Go',
+        history: '📜 History', clearAll: '🗑 Clear All',
+        titleCol: 'Title', length: 'Length', date: 'Date',
+        confirmClear: 'Delete ALL watch history for this channel?',
+        noChannels: 'No channels found.', searching: 'Searching...',
+        starting: 'Starting...', connLost: 'Connection lost.',
+        videos: 'videos',
+      },
+      ja: {
+        title: 'YouTubeチャレンジ',
+        channel: 'チャンネル', channelPh: '名前、@ハンドル、またはID',
+        folderName: 'フォルダ名', optional: '任意',
+        apiKey: 'APIキー', search: '🔍 検索',
+        prev: '← 前へ', done: '完了 → 次へ', next: '次へ →',
+        autoplay: '自動再生', go: '移動',
+        history: '📜 履歴', clearAll: '🗑 全削除',
+        titleCol: 'タイトル', length: '長さ', date: '日付',
+        confirmClear: 'このチャンネルの視聴履歴を全て削除しますか？',
+        noChannels: 'チャンネルが見つかりません。', searching: '検索中...',
+        starting: '開始中...', connLost: '接続が切れました。',
+        videos: '本',
+      }
+    };
+
+    let lang = localStorage.getItem('yt-lang') || 'ja';
+
+    function t(key) { return i18n[lang][key] || i18n.en[key] || key; }
+
+    function applyLang() {
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+      });
+      document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+        el.placeholder = t(el.dataset.i18nPh);
+      });
+      document.getElementById('langBtn').textContent = lang === 'en' ? '日本語' : 'English';
+    }
+
+    function toggleLang() {
+      lang = lang === 'en' ? 'ja' : 'en';
+      localStorage.setItem('yt-lang', lang);
+      applyLang();
+    }
+
+    let channels = [];
+    let currentSlug = '';
+    let videos = [];
+    let current = 0;
+    let progress = {};
+    let ytPlayer = null;
+
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+
+    let ytReady = false;
+    let pendingVideoId = null;
+
+    function onYouTubeIframeAPIReady() {
+      ytReady = true;
+      if (pendingVideoId) { createPlayer(pendingVideoId); pendingVideoId = null; }
+    }
+
+    function createPlayer(videoId) {
+      if (!ytReady) { pendingVideoId = videoId; return; }
+      if (ytPlayer) {
+        ytPlayer.loadVideoById(videoId);
+        return;
+      }
+      ytPlayer = new YT.Player('player', {
+        width: '100%',
+        height: '100%',
+        videoId: videoId,
+        playerVars: { autoplay: 1 },
+        events: { onStateChange: onPlayerStateChange },
+      });
+    }
+
+    function onPlayerStateChange(event) {
+      if (event.data === 0 && document.getElementById('autoplay').checked) {
+        next();
+      }
+    }
+
+    async function init() {
+      [channels, progress] = await Promise.all([
+        fetch('/api/channels').then(r => r.json()),
+        fetch('/api/progress').then(r => r.json()),
+      ]);
+      renderChannels();
+      const last = progress['_lastChannel'];
+      const defaultSlug = (last && channels.find(c => c.slug === last)) ? last : channels[0]?.slug;
+      if (defaultSlug) selectChannel(defaultSlug);
+    }
+
+    function formatTime(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function formatDuration(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function renderChannels() {
+      document.getElementById('channels').innerHTML = channels.map(ch =>
+        `<button class="channel-btn" data-slug="${ch.slug}" onclick="selectChannel('${ch.slug}')">${ch.name} <small>(${ch.watchedCount}/${ch.videoCount} · ${formatTime(ch.watchedSeconds)})</small></button>`
+      ).join('');
+    }
+
+    async function selectChannel(slug) {
+      currentSlug = slug;
+      videos = await fetch(`/api/channels/${slug}/videos`).then(r => r.json());
+      const savedId = progress[slug];
+      current = savedId ? videos.findIndex(v => v.id === savedId) : 0;
+      if (current < 0) current = 0;
+      document.getElementById('player-section').classList.remove('hidden');
+      document.querySelectorAll('.channel-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.slug === slug);
+      });
+      render();
+      save();
+    }
+
+    function render() {
+      if (!videos.length) return;
+      const v = videos[current];
+      createPlayer(v.id);
+      const dur = v.duration ? ` (${formatDuration(v.duration)})` : '';
+      document.getElementById('title').textContent = v.title + dur;
+      document.getElementById('progress').textContent = `${current + 1} / ${videos.length}`;
+    }
+
+    async function save() {
+      progress[currentSlug] = videos[current].id;
+      await fetch(`/api/progress/${currentSlug}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId: videos[current].id }),
+      });
+      fetch('/api/channels').then(r => r.json()).then(chs => { channels = chs; renderChannels(); });
+      if (!document.getElementById('history-panel').classList.contains('hidden')) renderHistory();
+    }
+
+    function next() { if (current < videos.length - 1) { current++; save(); render(); } }
+    function prev() { if (current > 0) { current--; save(); render(); } }
+    function markDone() { next(); }
+    function jump() {
+      const n = parseInt(document.getElementById('jumpInput').value, 10);
+      if (n >= 1 && n <= videos.length) { current = n - 1; save(); render(); }
+    }
+
+    async function toggleHistory() {
+      const panel = document.getElementById('history-panel');
+      if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
+      await renderHistory();
+      panel.classList.remove('hidden');
+    }
+
+    async function renderHistory() {
+      const history = await fetch(`/api/channels/${currentSlug}/history`).then(r => r.json());
+      document.getElementById('history-body').innerHTML = history.slice().reverse().map((h, i) =>
+        `<tr style="border-bottom:1px solid #222;"><td style="padding:0.3rem;color:#666">${history.length - i}</td><td style="padding:0.3rem">${h.title}</td><td style="padding:0.3rem;text-align:right;color:#888">${formatDuration(h.duration)}</td><td style="padding:0.3rem;text-align:right;color:#666">${new Date(h.watchedAt).toLocaleString()}</td><td style="padding:0.3rem"><button onclick="deleteHistory('${h.videoId}')" style="padding:0.2rem 0.5rem;font-size:0.75rem;background:#3a1a1a;border:1px solid #633;">✕</button></td></tr>`
+      ).join('');
+    }
+
+    async function deleteHistory(videoId) {
+      await fetch(`/api/channels/${currentSlug}/history/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId }),
+      });
+      await renderHistory();
+      fetch('/api/channels').then(r => r.json()).then(chs => { channels = chs; renderChannels(); });
+    }
+
+    async function clearHistory() {
+      if (!confirm(t('confirmClear'))) return;
+      await fetch(`/api/channels/${currentSlug}/history/clear`, { method: 'POST' });
+      await renderHistory();
+      fetch('/api/channels').then(r => r.json()).then(chs => { channels = chs; renderChannels(); });
+    }
+
+    async function searchChannel() {
+      const query = document.getElementById('addChannel').value.trim();
+      if (!query) return;
+
+      if (query.startsWith('UC') && query.length === 24) {
+        addChannelById(query);
+        return;
+      }
+
+      const statusEl = document.getElementById('fetchStatus');
+      const resultsEl = document.getElementById('searchResults');
+      const apiKey = document.getElementById('apiKeyInput').value.trim() || undefined;
+      statusEl.textContent = t('searching');
+      resultsEl.classList.add('hidden');
+
+      const res = await fetch('/api/channels/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, apiKey }),
+      });
+      const results = await res.json();
+      statusEl.textContent = '';
+
+      if (results.error) {
+        statusEl.innerHTML = `Error: ${results.error.replace(/href="\//g, 'href="https://developers.google.com/')}`;
+        return;
+      }
+
+      if (!results.length) {
+        statusEl.textContent = t('noChannels');
+        return;
+      }
+
+      if (results.length === 1 && query.startsWith('@')) {
+        addChannelById(results[0].id);
+        return;
+      }
+
+      resultsEl.innerHTML = results.map(r =>
+        `<div style="display:flex;align-items:center;gap:0.8rem;padding:0.5rem;border-bottom:1px solid #222;cursor:pointer;" onclick="addChannelById('${r.id}')">
+          <img src="${r.thumbnail}" style="width:40px;height:40px;border-radius:50%;">
+          <div><strong>${r.name}</strong><br><small style="color:#888">${r.videoCount} ${t('videos')} · ${r.id}</small></div>
+        </div>`
+      ).join('');
+      resultsEl.classList.remove('hidden');
+    }
+
+    async function addChannelById(channelId) {
+      const slug = document.getElementById('addSlug').value.trim() || undefined;
+      const apiKey = document.getElementById('apiKeyInput').value.trim() || undefined;
+      document.getElementById('searchResults').classList.add('hidden');
+
+      const statusEl = document.getElementById('fetchStatus');
+      statusEl.textContent = t('starting');
+
+      const res = await fetch('/api/channels/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: channelId, slug, apiKey }),
+      });
+      const { jobId } = await res.json();
+
+      const evtSource = new EventSource(`/api/channels/add/${jobId}/progress`);
+      evtSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          statusEl.textContent = `Error: ${data.error}`;
+          evtSource.close();
+          return;
+        }
+        statusEl.textContent = data.status;
+        if (data.done) {
+          evtSource.close();
+          document.getElementById('addChannel').value = '';
+          document.getElementById('addSlug').value = '';
+          fetch('/api/channels').then(r => r.json()).then(chs => {
+            channels = chs;
+            renderChannels();
+            if (data.slug) selectChannel(data.slug);
+          });
+          setTimeout(() => { statusEl.textContent = ''; }, 5000);
+        }
+      };
+      evtSource.onerror = () => { statusEl.textContent = t('connLost'); evtSource.close(); };
+    }
+
+    init();
+    applyLang();
+    document.getElementById('apiKeyInput').value = localStorage.getItem('yt-api-key') || '';
+  </script>
+</body>
+</html>

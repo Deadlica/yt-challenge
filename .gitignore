@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+data
+*.bak
+*.bak2
+.idea/
+.vscode/
+*.iml
