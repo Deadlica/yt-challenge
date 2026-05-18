@@ -38,34 +38,31 @@ function get(url) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function resolveChannelId(input) {
-  // Already a channel ID (starts with UC)
   if (input.startsWith('UC') && input.length === 24) return input;
-
-  // Try as handle (with or without @)
-  const handle = input.startsWith('@') ? input : `@${input}`;
+  const handle = input.startsWith('@') ? input.slice(1) : input;
   const res = await get(
-    `https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&forHandle=${encodeURIComponent(handle.slice(1))}&key=${apiKey}`
+    `https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&forHandle=${encodeURIComponent(handle)}&key=${apiKey}`
   );
   if (res.items && res.items.length) return res.items[0].id;
-
-  // Try as search query
   const search = await get(
     `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(input)}&maxResults=1&key=${apiKey}`
   );
   if (search.items && search.items.length) return search.items[0].snippet.channelId;
-
   throw new Error(`Could not resolve channel: ${input}`);
 }
 
-async function getChannelInfo(channelId) {
-  const ch = await get(
-    `https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails,statistics&id=${channelId}&key=${apiKey}`
-  );
-  if (!ch.items || !ch.items.length) throw new Error('Channel not found');
-  return ch.items[0];
-}
+async function main() {
+  const channelId = await resolveChannelId(channelArg);
+  console.log(`Resolved channel ID: ${channelId}`);
 
-async function fetchViaSearch(channelId) {
+  const channelInfo = await get(
+    `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${apiKey}`
+  );
+  const channelName = channelInfo.items[0].snippet.title;
+  const slug = slugArg || channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '') || 'channel';
+  console.log(`Channel: ${channelName} (${channelInfo.items[0].statistics.videoCount} videos) → slug: "${slug}"`);
+
+  // Fetch via search (date-windowed)
   const startYear = 2018;
   const now = new Date();
   const windows = [];
@@ -74,14 +71,11 @@ async function fetchViaSearch(channelId) {
       const from = new Date(y, m, 1);
       const to = new Date(y, m + 6, 1);
       if (from > now) break;
-      windows.push({
-        after: from.toISOString(),
-        before: (to > now ? now : to).toISOString(),
-      });
+      windows.push({ after: from.toISOString(), before: (to > now ? now : to).toISOString() });
     }
   }
 
-  const videos = [];
+  const searchVids = [];
   for (const w of windows) {
     let pageToken = '';
     do {
@@ -90,23 +84,17 @@ async function fetchViaSearch(channelId) {
       const page = await get(url);
       if (page.error || !page.items) break;
       for (const item of page.items) {
-        videos.push({
-          id: item.id.videoId,
-          title: item.snippet.title,
-          published: item.snippet.publishedAt,
-        });
+        searchVids.push({ id: item.id.videoId, title: item.snippet.title, published: item.snippet.publishedAt });
       }
       pageToken = page.nextPageToken || '';
       await sleep(100);
     } while (pageToken);
-    console.log(`[search] ${w.after.slice(0,7)} → ${w.before.slice(0,7)}: ${videos.length} videos`);
+    console.log(`[search] ${w.after.slice(0,7)} → ${w.before.slice(0,7)}: ${searchVids.length} videos`);
   }
-  return videos;
-}
 
-async function fetchViaPlaylist(channelId) {
+  // Fetch via playlist
   const uploadsId = 'UU' + channelId.slice(2);
-  const videos = [];
+  const playlistVids = [];
   let pageToken = '';
   do {
     let url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${uploadsId}&key=${apiKey}`;
@@ -114,47 +102,41 @@ async function fetchViaPlaylist(channelId) {
     const page = await get(url);
     if (page.error || !page.items) break;
     for (const item of page.items) {
-      videos.push({
-        id: item.snippet.resourceId.videoId,
-        title: item.snippet.title,
-        published: item.snippet.publishedAt,
-      });
+      playlistVids.push({ id: item.snippet.resourceId.videoId, title: item.snippet.title, published: item.snippet.publishedAt });
     }
     pageToken = page.nextPageToken || '';
     await sleep(100);
   } while (pageToken);
-  console.log(`[playlist] ${videos.length} videos`);
-  return videos;
-}
+  console.log(`[playlist] ${playlistVids.length} videos`);
 
-async function main() {
-  const channelId = await resolveChannelId(channelArg);
-  console.log(`Resolved channel ID: ${channelId}`);
-
-  const channelInfo = await getChannelInfo(channelId);
-  const channelName = channelInfo.snippet.title;
-  const slug = slugArg || channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '') || 'channel';
-
-  console.log(`Channel: ${channelName} (${channelInfo.statistics.videoCount} videos) → slug: "${slug}"`);
-
-  const [searchVids, playlistVids] = await Promise.all([
-    fetchViaSearch(channelId),
-    fetchViaPlaylist(channelId),
-  ]);
-
+  // Deduplicate and sort
   const map = new Map();
   for (const v of [...searchVids, ...playlistVids]) {
     if (!map.has(v.id)) map.set(v.id, v);
   }
-
   const videos = [...map.values()];
   videos.sort((a, b) => a.published.localeCompare(b.published));
 
-  const output = videos.map(v => ({ id: v.id, title: v.title }));
+  // Fetch durations
+  console.log(`Fetching durations for ${videos.length} videos...`);
+  const durations = new Map();
+  for (let i = 0; i < videos.length; i += 50) {
+    const batch = videos.slice(i, i + 50);
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${batch.map(v => v.id).join(',')}&key=${apiKey}`;
+    const res = await get(url);
+    if (res.items) {
+      for (const item of res.items) {
+        const m = item.contentDetails.duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        if (m) durations.set(item.id, (parseInt(m[1]||'0')*3600)+(parseInt(m[2]||'0')*60)+parseInt(m[3]||'0'));
+      }
+    }
+    await sleep(100);
+  }
+
+  const output = videos.map(v => ({ id: v.id, title: v.title, duration: durations.get(v.id) || 0 }));
 
   const outDir = path.join(__dirname, '..', 'data', slug);
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-
   fs.writeFileSync(path.join(outDir, 'videos.json'), JSON.stringify(output, null, 2));
   fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify({ name: channelName }));
   console.log(`Done. ${output.length} unique videos written to data/${slug}/`);

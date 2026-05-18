@@ -1,12 +1,11 @@
 node_modules
-dist
+.next
 .git
 .gitignore
 .env
+data
 *.bak
-*.bak2
 npm-debug.log*
 README.md
 Dockerfile
 .dockerignore
-data
