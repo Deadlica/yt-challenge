@@ -144,7 +144,8 @@ export default function Player() {
     if (slugRef.current && playerRef.current?.getCurrentTime && playerRef.current.getCurrentTime() > 0) {
       await saveProgress();
     }
-    const p = prog || progress;
+    const p = prog || await fetch('/api/progress').then(r => r.json());
+    setProgress(p);
     const vids = await fetch(`/api/channels/${s}/videos`).then(r => r.json());
     const saved = p[s];
     const savedId = saved?.videoId || saved;
