@@ -80,11 +80,33 @@ export default function Player() {
   }, []);
 
   // Load YouTube IFrame API
+  const pendingVideo = useRef<{ id: string; time: number } | null>(null);
+
   useEffect(() => {
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
-    window.onYouTubeIframeAPIReady = () => { ytReady.current = true; };
+    playerRef.current = null;
+
+    if (window.YT?.Player) {
+      ytReady.current = true;
+      return;
+    }
+
+    if (!(window as any).__ytLoading) {
+      (window as any).__ytLoading = true;
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+    }
+
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      ytReady.current = true;
+      if (pendingVideo.current) {
+        createPlayer(pendingVideo.current.id, pendingVideo.current.time);
+        pendingVideo.current = null;
+      }
+    };
+
+    return () => { window.onYouTubeIframeAPIReady = prev as any; };
   }, []);
 
   // Initial data load
@@ -125,10 +147,14 @@ export default function Player() {
   }, []);
 
   function createPlayer(videoId: string, startTime: number = 0) {
-    if (!ytReady.current) {
-      setTimeout(() => createPlayer(videoId, startTime), 200);
+    if (!window.YT?.Player || !document.getElementById('yt-player')) {
+      pendingVideo.current = { id: videoId, time: startTime };
+      setTimeout(() => {
+        if (pendingVideo.current?.id === videoId) createPlayer(videoId, startTime);
+      }, 300);
       return;
     }
+    pendingVideo.current = null;
     if (playerRef.current) {
       playerRef.current.loadVideoById({ videoId, startSeconds: startTime });
       return;
@@ -163,6 +189,7 @@ export default function Player() {
     videosRef.current = vids;
     currentRef.current = idx;
     createPlayer(vids[idx]?.id, savedTime.current);
+    if (historyOpen) loadHistory();
   }
 
   async function saveProgress() {
@@ -333,8 +360,16 @@ export default function Player() {
       {v && (
         <>
           <div style={{ color: '#aaa', marginBottom: '1rem' }}>{current + 1} / {videos.length}</div>
-          <div style={{ width: '100%', maxWidth: '800px', aspectRatio: '16/9', marginBottom: '1.5rem' }}>
+          <div style={{ width: '100%', maxWidth: '800px', aspectRatio: '16/9', marginBottom: '0.5rem' }}>
             <div id="yt-player" style={{ width: '100%', height: '100%' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', fontSize: '0.8rem' }}>
+            <a href={`https://www.youtube.com/watch?v=${v.id}`} target="_blank" rel="noopener" style={{ color: '#888', textDecoration: 'underline' }}>
+              {lang === 'ja' ? 'YouTubeで開く' : 'Open in YouTube'}
+            </a>
+            <button onClick={() => window.location.reload()} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline', padding: 0 }}>
+              {lang === 'ja' ? '再読み込み' : 'Reload'}
+            </button>
           </div>
           <div style={{ marginBottom: '1rem', fontSize: '1.1rem', textAlign: 'center', maxWidth: '800px' }}>
             {v.title}{v.duration ? ` (${formatDuration(v.duration)})` : ''}

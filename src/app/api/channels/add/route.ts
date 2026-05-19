@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getApiKey, getDataDir } from '@/lib/data';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import https from 'https';
 
@@ -110,7 +110,17 @@ export async function POST(req: Request) {
     if (!chInfo.items?.length) return NextResponse.json({ error: 'Channel not found' });
 
     const channelName = chInfo.items[0].snippet.title;
-    const slug = slugInput || channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '') || 'channel';
+    const handle = (chInfo.items[0].snippet.customUrl || '').replace(/^@/, '').toLowerCase();
+    const slug = slugInput || handle || channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || channelId.slice(2, 10).toLowerCase();
+
+    // Check for slug conflict (different channel using same slug)
+    const metaPath = join(getDataDir(), slug, 'meta.json');
+    if (existsSync(metaPath)) {
+      const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
+      if (existing.channelId && existing.channelId !== channelId) {
+        return NextResponse.json({ error: `Folder "${slug}" already used by "${existing.name}". Choose a different folder name.` });
+      }
+    }
 
     const [searchVids, playlistVids] = await Promise.all([
       fetchViaSearch(channelId, apiKey),
@@ -130,7 +140,7 @@ export async function POST(req: Request) {
     const outDir = join(getDataDir(), slug);
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
     writeFileSync(join(outDir, 'videos.json'), JSON.stringify(output, null, 2));
-    writeFileSync(join(outDir, 'meta.json'), JSON.stringify({ name: channelName }));
+    writeFileSync(join(outDir, 'meta.json'), JSON.stringify({ name: channelName, channelId }));
 
     return NextResponse.json({ status: 'done', slug, videoCount: output.length });
   } catch (e: any) {
