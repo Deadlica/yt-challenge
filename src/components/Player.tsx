@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Stats from './Stats';
 
 const i18n = {
   en: {
@@ -56,6 +57,7 @@ export default function Player() {
   const [query, setQuery] = useState('');
   const [slug, setSlug] = useState('');
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [statsKey, setStatsKey] = useState(0);
 
   const playerRef = useRef<any>(null);
   const ytReady = useRef(false);
@@ -173,6 +175,7 @@ export default function Player() {
     });
     const chs = await fetch('/api/channels').then(r => r.json());
     setChannels(chs);
+    setStatsKey(k => k + 1);
   }
 
   function advance(dir: number) {
@@ -323,6 +326,8 @@ export default function Player() {
           </div>
         ))}
       </div>
+
+      <Stats lang={lang} refreshKey={statsKey} />
 
       {/* Player */}
       {v && (
